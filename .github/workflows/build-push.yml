@@ -1,4 +1,4 @@
-name: Build and Push — julia-comfyui-ipadapter
+name: Build and Push — julia-comfyui
 
 on:
   push:
@@ -7,12 +7,12 @@ on:
 
 env:
   REGISTRY: registry.digital-ai.tech
-  IMAGE_NAME: registry.digital-ai.tech/julia-comfyui-ipadapter
+  IMAGE_NAME: registry.digital-ai.tech/julia-comfyui
 
 jobs:
   build-push:
     name: Build & Push
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, docker-builder]
     timeout-minutes: 60
 
     steps:
@@ -37,7 +37,7 @@ jobs:
           echo "Building image: ${{ env.IMAGE_NAME }}:${SHA8}"
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
@@ -45,16 +45,13 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha8 }}
-          # Cache via registry (sem S3 extra)
+          # Cache via registry (reutiliza layers entre builds)
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
           platforms: linux/amd64
 
       - name: Verify push
         run: |
-          echo "Image pushed successfully:"
+          echo "✅ Image pushed successfully:"
           echo "  ${{ env.IMAGE_NAME }}:latest"
           echo "  ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha8 }}"
-          echo ""
-          echo "Verify with:"
-          echo "  curl -su USER:PASS https://registry.digital-ai.tech/v2/julia-comfyui-ipadapter/tags/list | jq ."
