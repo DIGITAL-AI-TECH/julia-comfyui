@@ -8,11 +8,9 @@ RUN apt-get update -qq && \
 # InsightFace + onnxruntime (compila do source com g++)
 RUN pip install --quiet --no-cache-dir onnxruntime insightface==0.7.3
 
-# ComfyUI_IPAdapter_plus
+# ComfyUI_IPAdapter_plus (sem requirements.txt no repo — deps já instaladas acima)
 RUN git clone --quiet https://github.com/cubiq/ComfyUI_IPAdapter_plus.git \
-    /comfyui/custom_nodes/ComfyUI_IPAdapter_plus && \
-    pip install --quiet --no-cache-dir \
-    -r /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/requirements.txt
+    /comfyui/custom_nodes/ComfyUI_IPAdapter_plus
 
 # Verificação no build — falha aqui = imagem não sobe com dependência quebrada
 RUN python3 -c "import insightface; print('InsightFace OK')" && \
