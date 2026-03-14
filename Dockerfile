@@ -2,7 +2,7 @@ FROM runpod/worker-comfyui:5.7.1-base
 
 # g++ necessário para compilar insightface do source (Python 3.12 — sem wheel cp312)
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends g++ cmake && \
+    apt-get install -y --no-install-recommends g++ cmake python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # InsightFace + onnxruntime (compila do source com g++)
