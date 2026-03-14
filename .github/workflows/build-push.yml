@@ -12,10 +12,21 @@ env:
 jobs:
   build-push:
     name: Build & Push
-    runs-on: [self-hosted, linux, docker-builder]
+    runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
+      - name: Free disk space (~30GB extras)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -29,13 +40,6 @@ jobs:
           username: ${{ secrets.REGISTRY_USER }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Extract metadata
-        id: meta
-        run: |
-          SHA8=$(echo "${{ github.sha }}" | cut -c1-8)
-          echo "sha8=${SHA8}" >> $GITHUB_OUTPUT
-          echo "Building image: ${{ env.IMAGE_NAME }}:${SHA8}"
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -44,14 +48,12 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha8 }}
-          # Cache via registry (reutiliza layers entre builds)
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
           platforms: linux/amd64
 
       - name: Verify push
         run: |
-          echo "✅ Image pushed successfully:"
+          echo "✅ Image pushed:"
           echo "  ${{ env.IMAGE_NAME }}:latest"
-          echo "  ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha8 }}"
