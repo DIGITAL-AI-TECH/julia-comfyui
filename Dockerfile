@@ -33,6 +33,14 @@ RUN git clone --quiet https://github.com/cubiq/ComfyUI_IPAdapter_plus.git \
 RUN git clone --quiet https://github.com/sipie800/ComfyUI-PuLID-Flux-Enhanced.git \
     /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced
 
+# ComfyUI_FluxMod: ChromaDiffusionLoader + ChromaPaddingRemoval (suporte ao modelo Chroma)
+# Sem requirements.txt — usa apenas deps do base image (torch etc.)
+# DIAGNÓSTICO: gonzalomoChroma usa arquitetura "Chroma" (FLUX sem time_in).
+#   CheckpointLoaderSimple → KSampler falha com: 'Chroma' object has no attribute 'time_in'
+#   Solução: ChromaDiffusionLoader carrega o modelo de forma compatível com KSampler
+RUN git clone --quiet https://github.com/lodestone-rock/ComfyUI_FluxMod.git \
+    /comfyui/custom_nodes/ComfyUI_FluxMod
+
 # ─── Patch pulidflux.py: lazy imports para evitar startup hang ────────────────
 # PROBLEMA: pulidflux.py importa FaceAnalysis, FaceRestoreHelper, init_parsing_model
 #   no nível de MÓDULO (linhas 12-14), mas só usa dentro de métodos (linhas 281/374/384).
@@ -94,9 +102,12 @@ RUN mkdir -p /comfyui/models && \
     ln -sf /runpod-volume/models/eva_clip     /comfyui/models/eva_clip     && \
     ln -sf /runpod-volume/models/unet         /comfyui/models/unet         && \
     ln -sf /runpod-volume/models/vae          /comfyui/models/vae          && \
-    ln -sf /runpod-volume/models/clip         /comfyui/models/clip
+    ln -sf /runpod-volume/models/clip         /comfyui/models/clip         && \
+    ln -sf /runpod-volume/models/checkpoints  /comfyui/models/diffusion_models
+# NOTA: diffusion_models → checkpoints para ChromaDiffusionLoader encontrar gonzalomoChroma_v30.safetensors
 
 # ─── Verificação de build ──────────────────────────────────────────────────────
 RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK')" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
-    ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK"
+    ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK" && \
+    ls /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "FluxMod/ChromaWrapper OK"
