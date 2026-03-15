@@ -5,11 +5,10 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends g++ cmake python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# onnxruntime-gpu + insightface
-# - onnxruntime (CPU) crasha o container ao substituir onnxruntime-gpu do base image
-# - a venv não tem onnxruntime nativa → insightface falha sem ele
-# - solução: instalar onnxruntime-gpu explicitamente (preserva suporte a CUDA)
-RUN pip install --quiet --no-cache-dir onnxruntime-gpu insightface==0.7.3
+# onnxruntime-gpu + insightface — instalar na VENV do ComfyUI (/opt/venv)
+# CRÍTICO: usar /opt/venv/bin/pip (não pip do sistema) — é a venv usada em runtime
+# onnxruntime-gpu: versão GPU compatível com CUDA base image (não CPU — crasha o container)
+RUN /opt/venv/bin/pip install --quiet --no-cache-dir onnxruntime-gpu insightface==0.7.3
 
 # ComfyUI_IPAdapter_plus — habilita InsightFaceLoader + IPAdapterFaceIDPlus
 RUN git clone --quiet https://github.com/cubiq/ComfyUI_IPAdapter_plus.git \
@@ -20,7 +19,7 @@ RUN mkdir -p /comfyui/models && \
     ln -sf /runpod-volume/models/ipadapter /comfyui/models/ipadapter && \
     ln -sf /runpod-volume/models/insightface /comfyui/models/insightface
 
-# Verificação de build
-RUN python3 -c "import insightface, onnxruntime; print(f'InsightFace OK | onnxruntime {onnxruntime.__version__}')" && \
+# Verificação na VENV (não no python3 do sistema — resultado enganoso)
+RUN /opt/venv/bin/python -c "import insightface, onnxruntime; print(f'InsightFace OK | onnxruntime {onnxruntime.__version__}')" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && \
     echo "IPAdapter OK"
