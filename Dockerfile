@@ -33,6 +33,57 @@ RUN git clone --quiet https://github.com/cubiq/ComfyUI_IPAdapter_plus.git \
 RUN git clone --quiet https://github.com/sipie800/ComfyUI-PuLID-Flux-Enhanced.git \
     /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced
 
+# ─── Patch pulidflux.py: lazy imports para evitar startup hang ────────────────
+# PROBLEMA: pulidflux.py importa FaceAnalysis, FaceRestoreHelper, init_parsing_model
+#   no nível de MÓDULO (linhas 12-14), mas só usa dentro de métodos (linhas 281/374/384).
+#   Essas importações executam código pesado de GPU/modelo no startup do ComfyUI,
+#   causando o container ficar em initializing por 45+ minutos.
+# SOLUÇÃO: mover para lazy imports (function-level) — importar só quando o método executa.
+RUN python3 << 'EOF'
+import re
+
+path = '/comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py'
+with open(path, 'r') as f:
+    content = f.read()
+
+# 1. Remove top-level imports (comment them out)
+content = content.replace(
+    'from insightface.app import FaceAnalysis\n',
+    '# lazy-import: FaceAnalysis imported inside load_insightface()\n'
+)
+content = content.replace(
+    'from facexlib.parsing import init_parsing_model\n',
+    '# lazy-import: init_parsing_model imported inside execute()\n'
+)
+content = content.replace(
+    'from facexlib.utils.face_restoration_helper import FaceRestoreHelper\n',
+    '# lazy-import: FaceRestoreHelper imported inside execute()\n'
+)
+
+# 2. Add lazy import before FaceAnalysis usage in load_insightface()
+content = content.replace(
+    '        model = FaceAnalysis(name="antelopev2"',
+    '        from insightface.app import FaceAnalysis\n        model = FaceAnalysis(name="antelopev2"'
+)
+
+# 3. Add lazy imports before FaceRestoreHelper usage in execute()
+content = content.replace(
+    '        face_helper = FaceRestoreHelper(\n',
+    '        from facexlib.parsing import init_parsing_model\n        from facexlib.utils.face_restoration_helper import FaceRestoreHelper\n        face_helper = FaceRestoreHelper(\n'
+)
+
+with open(path, 'w') as f:
+    f.write(content)
+
+# Verify patch was applied
+assert '# lazy-import: FaceAnalysis' in content, 'FaceAnalysis patch failed'
+assert '# lazy-import: init_parsing_model' in content, 'init_parsing_model patch failed'
+assert '# lazy-import: FaceRestoreHelper' in content, 'FaceRestoreHelper patch failed'
+assert 'from insightface.app import FaceAnalysis\n        model = FaceAnalysis' in content, 'lazy FaceAnalysis injection failed'
+assert 'from facexlib.parsing import init_parsing_model\n        from facexlib.utils.face_restoration_helper import FaceRestoreHelper\n        face_helper = FaceRestoreHelper' in content, 'lazy facexlib injection failed'
+print('pulidflux.py patched OK — all 3 lazy imports verified')
+EOF
+
 # ─── Symlinks: Network Volume → ComfyUI model paths ───────────────────────────
 # Modelos ficam no volume persistente (/runpod-volume/models/)
 # ComfyUI procura em /comfyui/models/ → symlinks resolvem em runtime
