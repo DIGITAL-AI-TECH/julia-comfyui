@@ -41,6 +41,61 @@ RUN git clone --quiet https://github.com/sipie800/ComfyUI-PuLID-Flux-Enhanced.gi
 RUN git clone --quiet https://github.com/lodestone-rock/ComfyUI_FluxMod.git \
     /comfyui/custom_nodes/ComfyUI_FluxMod
 
+# ─── Patch ComfyUI_FluxMod/loader.py: compatibilidade pick_operations API ─────
+# PROBLEMA: ComfyUI_FluxMod chama pick_operations(scaled_fp8=...) mas o
+#   ComfyUI atual (main-base, Feb 2026) renomeou o parâmetro para model_config=.
+#   Ambas as APIs existiram em versões diferentes:
+#     ComfyUI v0.3.x: pick_operations(..., scaled_fp8=None)
+#     ComfyUI main (Feb 2026+): pick_operations(..., model_config=None)
+# SOLUÇÃO: patch com try/except — tenta a API nova, fallback para antiga.
+#   Para Chroma em bf16: scaled_fp8=None mesmo, então ambas as APIs são equivalentes.
+RUN python3 << 'EOF'
+import inspect, comfy.ops
+
+path = '/comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py'
+with open(path, 'r') as f:
+    content = f.read()
+
+old_block = '''        fp8 = model_conf.optimizations.get("fp8", model_conf.scaled_fp8 is not None)
+        operations = comfy.ops.pick_operations(
+            unet_config.get("dtype"),
+            model.manual_cast_dtype,
+            fp8_optimizations=fp8,
+            scaled_fp8=model_conf.scaled_fp8,
+        )'''
+
+new_block = '''        fp8 = model_conf.optimizations.get("fp8", getattr(model_conf, 'scaled_fp8', None) is not None)
+        _pick_params = inspect.signature(comfy.ops.pick_operations).parameters
+        if 'scaled_fp8' in _pick_params:
+            operations = comfy.ops.pick_operations(
+                unet_config.get("dtype"),
+                model.manual_cast_dtype,
+                fp8_optimizations=fp8,
+                scaled_fp8=getattr(model_conf, 'scaled_fp8', None),
+            )
+        else:
+            # ComfyUI main (Feb 2026+): uses model_config= instead of scaled_fp8=
+            operations = comfy.ops.pick_operations(
+                unet_config.get("dtype"),
+                model.manual_cast_dtype,
+                fp8_optimizations=fp8,
+                model_config=model_conf,
+            )'''
+
+assert old_block in content, f'Target block not found in loader.py!'
+content = content.replace(old_block, new_block)
+assert 'inspect.signature' in content, 'Patch was not applied!'
+
+# Add inspect import at the top of the file
+if 'import inspect' not in content:
+    content = 'import inspect\n' + content
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print('loader.py patched OK — pick_operations compatibility shim applied')
+EOF
+
 # ─── Patch pulidflux.py: lazy imports para evitar startup hang ────────────────
 # PROBLEMA: pulidflux.py importa FaceAnalysis, FaceRestoreHelper, init_parsing_model
 #   no nível de MÓDULO (linhas 12-14), mas só usa dentro de métodos (linhas 281/374/384).
