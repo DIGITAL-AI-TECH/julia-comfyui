@@ -660,8 +660,89 @@ RUN mkdir -p /comfyui/models && \
     ln -sf /runpod-volume/models/clip         /comfyui/models/clip         && \
     ln -sf /runpod-volume/models/checkpoints        /comfyui/models/diffusion_models  && \
     ln -sf /runpod-volume/models/facerestore_models /comfyui/models/facerestore_models && \
-    ln -sf /runpod-volume/models/upscale_models     /comfyui/models/upscale_models
+    ln -sf /runpod-volume/models/upscale_models     /comfyui/models/upscale_models     && \
+    ln -sf /runpod-volume/models/animatediff        /comfyui/models/animatediff        && \
+    ln -sf /runpod-volume/models/controlnet         /comfyui/models/controlnet         && \
+    ln -sf /runpod-volume/models/loras              /comfyui/models/loras              && \
+    ln -sf /runpod-volume/models/vhs_video          /comfyui/models/vhs_video
 # NOTA: diffusion_models → checkpoints para ChromaDiffusionLoader encontrar gonzalomoChroma_v30.safetensors
+# animatediff → motion modules para AnimateDiff Evolved
+# controlnet  → ControlNet models (OpenPose, DepthAnything, etc.)
+# loras       → LoRA models
+# vhs_video   → VideoHelperSuite cache
+
+# ─── HuggingFace cache → volume (evita re-download de modelos ControlNet/DWPose) ─
+ENV HF_HOME=/runpod-volume/huggingface
+
+# ─── Video & Animation Stack ──────────────────────────────────────────────────
+# Deps Python para os novos custom nodes de vídeo e pose
+# NOTA: controlnet_aux lista opencv-python → instalar via headless no cleanup final
+# mediapipe: pose detection fallback (não faz CUDA JIT no module import)
+# diffusers>=0.33.0: necessário para Wan Video 2.1 wrapper
+# gguf>=0.17.1: suporte a modelos quantizados Wan/LLM
+# NO numba: não está em nenhum requirements dos nodes adicionados
+RUN /opt/venv/bin/pip install --quiet --no-cache-dir \
+    "diffusers>=0.33.0" \
+    "accelerate>=1.2.1" \
+    "peft>=0.17.0" \
+    "sentencepiece>=0.2.0" \
+    "protobuf" \
+    "pyloudnorm" \
+    "gguf>=0.17.1" \
+    "imageio-ffmpeg" \
+    "scikit-image>=0.21" \
+    "scikit-learn" \
+    "mediapipe" \
+    "omegaconf" \
+    "trimesh" \
+    "addict" \
+    "yacs" \
+    "matplotlib" \
+    "python-dateutil" \
+    "yapf"
+
+# ─── AnimateDiff Evolved ──────────────────────────────────────────────────────
+# Animação SD 1.5 com motion modules — base para dance videos
+# Suporta: motion modules, MotionLoRA, SparseCtrl, IPAdapter + AnimateDiff
+RUN git clone --quiet --depth 1 https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved.git \
+    /comfyui/custom_nodes/ComfyUI-AnimateDiff-Evolved
+
+# ─── ControlNet Aux — preprocessors de pose e profundidade ────────────────────
+# CRÍTICO para replicar Kling-style dance:
+#   DWPose: extração de pose corporal 2D frame-a-frame de vídeos de referência
+#   OpenPose: alternativa a DWPose (rosto + mãos + corpo)
+#   DepthAnything: mapa de profundidade para composição 3D
+#   Lineart/Canny: controle de estilo/bordas
+# Pipeline dance: video_ref → DWPose → pose sequence → AnimateDiff/WanVideo + ControlNet
+RUN git clone --quiet --depth 1 https://github.com/Fannovel16/comfyui_controlnet_aux.git \
+    /comfyui/custom_nodes/comfyui_controlnet_aux
+
+# ─── Video Helper Suite ────────────────────────────────────────────────────────
+# I/O de vídeo: load_video → frames, frames → export_video
+# Necessário para: carregar vídeo de referência de dança, exportar resultado
+RUN git clone --quiet --depth 1 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git \
+    /comfyui/custom_nodes/ComfyUI-VideoHelperSuite
+
+# ─── Wan Video Wrapper (kijai) — melhor vídeo open-source 2025 ────────────────
+# Wan 2.1: melhor modelo open-source para geração de vídeo com motion realista
+# Qualidade ~80% do Kling para dance/motion com modelos 14B (28GB VRAM)
+# Cabe confortavelmente no A100 80GB junto com ControlNet e IPAdapter
+# Modelos no volume: /runpod-volume/models/wan_video/
+RUN git clone --quiet --depth 1 https://github.com/kijai/ComfyUI-WanVideoWrapper.git \
+    /comfyui/custom_nodes/ComfyUI-WanVideoWrapper
+
+# ─── Ultimate SD Upscale — tile upscale sem distorção ─────────────────────────
+# Upscale em tiles: evita distorção em imagens grandes (>2048px)
+# Indispensável para imagens finais 4K com faces nítidas
+RUN git clone --quiet --depth 1 https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git \
+    /comfyui/custom_nodes/ComfyUI_UltimateSDUpscale
+
+# Garantir opencv headless após todos os installs (vários nodes instalam GUI opencv)
+RUN /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir "opencv-python-headless>=4.7.0.72"
+
+# Symlink Wan Video models
+RUN ln -sf /runpod-volume/models/wan_video /comfyui/models/wan_video 2>/dev/null || true
 
 # ─── Verificação de build ──────────────────────────────────────────────────────
 RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia, cv2; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK'); print('opencv ' + cv2.__version__)" && \
@@ -669,6 +750,11 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK" && \
     ls /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "FluxMod/ChromaWrapper OK" && \
     ls /comfyui/custom_nodes/comfyui-reactor-node && echo "ReActor OK" && \
+    ls /comfyui/custom_nodes/ComfyUI-AnimateDiff-Evolved && echo "AnimateDiff OK" && \
+    ls /comfyui/custom_nodes/comfyui_controlnet_aux && echo "ControlNet Aux OK" && \
+    ls /comfyui/custom_nodes/ComfyUI-VideoHelperSuite && echo "VideoHelperSuite OK" && \
+    ls /comfyui/custom_nodes/ComfyUI-WanVideoWrapper && echo "WanVideo OK" && \
+    ls /comfyui/custom_nodes/ComfyUI_UltimateSDUpscale && echo "UltimateUpscale OK" && \
     grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py pick_operations patch OK" && \
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
