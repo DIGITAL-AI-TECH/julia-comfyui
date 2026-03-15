@@ -23,11 +23,7 @@ RUN mkdir -p /comfyui/models && \
     ln -sf /runpod-volume/models/insightface /comfyui/models/insightface
 
 # Verificação na VENV — debug de versão + import check
-RUN /opt/venv/bin/python -c "
-import onnxruntime, insightface
-print(f'onnxruntime {onnxruntime.__version__}')
-print(f'providers: {onnxruntime.get_available_providers()}')
-print('insightface OK')
-" && \
+# NOTA: python -c deve ser em linha única (BuildKit não aceita aspas duplas multiline no RUN)
+RUN /opt/venv/bin/python -c "import onnxruntime, insightface; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK')" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && \
     echo "IPAdapter OK"
