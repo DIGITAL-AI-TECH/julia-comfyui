@@ -537,13 +537,11 @@ content = content.replace(insert_before, forward_orig_chroma_native + insert_bef
 assert 'forward_orig_chroma_native' in content, 'ERROR: forward_orig_chroma_native injection failed!'
 
 # ─── 3. Detectar FluxMod vs Chroma nativo vs FLUX.1-dev em apply_pulid_flux ──
+# NOTA: old_method deve ser o TEXTO ORIGINAL do pulidflux.py (git clone),
+#   NÃO o texto patcheado pelo Build #36. Cada build começa do zero.
 old_method = (
     '            # Replace model forward_orig with our own\n'
-    '            # FIX: detect FluxMod (Chroma) — uses distribute_modulations, no time_in\n'
-    '            if hasattr(flux_model, \'distribute_modulations\'):\n'
-    '                new_method = forward_orig_fluxmod.__get__(flux_model, flux_model.__class__)\n'
-    '            else:\n'
-    '                new_method = forward_orig.__get__(flux_model, flux_model.__class__)\n'
+    '            new_method = forward_orig.__get__(flux_model, flux_model.__class__)\n'
     '            setattr(flux_model, \'forward_orig\', new_method)\n'
 )
 new_method = (
