@@ -43,4 +43,4 @@ RUN mkdir -p /comfyui/models && \
 # ─── Verificação de build ──────────────────────────────────────────────────────
 RUN /opt/venv/bin/python -c "import onnxruntime, insightface, open_clip, facexlib, einops, kornia; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('open_clip OK'); print('facexlib OK')" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
-    ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulid_flux.py && echo "PuLID OK"
+    ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK"
