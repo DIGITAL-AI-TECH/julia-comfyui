@@ -181,6 +181,187 @@ with open(path, 'w') as f:
 print('layers.py patched OK — RMSNorm class defined with scale parameter (checkpoint-compatible)')
 EOF
 
+# ─── Patch pulidflux.py: forward_orig_fluxmod para Chroma/FluxMod ────────────
+# PROBLEMA: PuLID substitui flux_model.forward_orig com uma versão FLUX que chama
+#   self.time_in(timestep_embedding(timesteps, 256)) — mas FluxMod (ChromaDiffusionLoader)
+#   não tem time_in. Resultado: 'FluxMod' object has no attribute 'time_in'
+#
+# ROOT CAUSE: FluxMod usa arquitetura Chroma:
+#   - distilled_guidance_layer (Approximator) em vez de time_in
+#   - distribute_modulations() → mod_vectors_dict (dict por bloco)
+#   - Blocos: DoubleStreamBlock customizado com distill_vec= (não vec=)
+#
+# FIX: adicionar forward_orig_fluxmod que replica FluxMod.forward_orig com
+#   PuLID attention injection após cada bloco. Na apply_pulid_flux, detectar
+#   FluxMod via hasattr(flux_model, 'distribute_modulations') e usar a versão correta.
+RUN python3 << 'PYEOF'
+path = '/comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py'
+with open(path, 'r') as f:
+    content = f.read()
+
+# ─── 1. Inserir forward_orig_fluxmod antes de tensor_to_image ─────────────────
+forward_orig_fluxmod = '''
+def forward_orig_fluxmod(
+    self,
+    img,
+    img_ids,
+    txt,
+    txt_ids,
+    timesteps,
+    guidance=None,
+    control=None,
+    transformer_options={},
+    **kwargs
+):
+    """FluxMod-compatible forward_orig com PuLID attention injection.
+    Usado quando ChromaDiffusionLoader carrega o modelo (arquitetura FluxMod/Chroma).
+    Não usa time_in — usa distilled_guidance_layer + distribute_modulations.
+    Blocos chamados com distill_vec= (interface FluxMod customizada).
+    """
+    import torch
+    device = comfy.model_management.get_torch_device()
+    patches_replace = transformer_options.get("patches_replace", {})
+
+    if img.ndim != 3 or txt.ndim != 3:
+        raise ValueError("Input img and txt tensors must have 3 dimensions.")
+
+    img = self.img_in(img)
+
+    # FluxMod: compute modulations via distilled_guidance_layer (no time_in)
+    lite = getattr(self, \'lite\', False)
+    mod_index_length = 212 if lite else 344
+    ts_dim = 8 if lite else 16
+    mod_dim = 16 if lite else 32
+
+    distill_timestep = timestep_embedding(timesteps.detach().clone(), ts_dim).to(device=img.device, dtype=img.dtype)
+    if guidance is None:
+        guidance = torch.zeros_like(timesteps)
+    distil_guidance = timestep_embedding(guidance.detach().clone(), ts_dim).to(device=img.device, dtype=img.dtype)
+
+    modulation_index = timestep_embedding(torch.arange(mod_index_length), mod_dim).to(device=img.device, dtype=img.dtype)
+    modulation_index = modulation_index.unsqueeze(0).repeat(img.shape[0], 1, 1)
+    timestep_guidance = torch.cat([distill_timestep, distil_guidance], dim=1).unsqueeze(1).repeat(1, mod_index_length, 1)
+    input_vec = torch.cat([timestep_guidance, modulation_index], dim=-1)
+
+    mod_vectors = self.distilled_guidance_layer(input_vec)
+    mod_vectors_dict = self.distribute_modulations(mod_vectors, len(self.double_blocks), len(self.single_blocks))
+
+    txt = self.txt_in(txt)
+    ids = torch.cat((txt_ids, img_ids), dim=1)
+    pe = self.pe_embedder(ids)
+
+    ca_idx = 0
+    blocks_replace = patches_replace.get("dit", {})
+    for i, block in enumerate(self.double_blocks):
+        if i not in getattr(self, \'skip_mmdit\', []):
+            img_mod = mod_vectors_dict[f"double_blocks.{i}.img_mod.lin"]
+            txt_mod = mod_vectors_dict[f"double_blocks.{i}.txt_mod.lin"]
+            double_mod = [img_mod, txt_mod]
+
+            if ("double_block", i) in blocks_replace:
+                def block_wrap(args):
+                    out = {}
+                    out["img"], out["txt"] = block(img=args["img"], txt=args["txt"], pe=args["pe"], distill_vec=args["distill_vec"])
+                    return out
+                out = blocks_replace[("double_block", i)]({"img": img, "txt": txt, "pe": pe, "distill_vec": double_mod}, {"original_block": block_wrap})
+                txt = out["txt"]
+                img = out["img"]
+            else:
+                img, txt = block(img=img, txt=txt, pe=pe, distill_vec=double_mod)
+
+            if control is not None:
+                control_i = control.get("input")
+                if i < len(control_i):
+                    add = control_i[i]
+                    if add is not None:
+                        img += add
+
+            # PuLID attention injection (double blocks)
+            if self.pulid_data:
+                if i % self.pulid_double_interval == 0:
+                    for _, node_data in self.pulid_data.items():
+                        condition_start = node_data[\'sigma_start\'] >= timesteps
+                        condition_end = timesteps >= node_data[\'sigma_end\']
+                        condition = torch.logical_and(condition_start, condition_end).all()
+                        if condition:
+                            img = img + node_data[\'weight\'] * self.pulid_ca[ca_idx].to(device)(node_data[\'embedding\'], img)
+                    ca_idx += 1
+
+    img = torch.cat((txt, img), 1)
+
+    for i, block in enumerate(self.single_blocks):
+        if i not in getattr(self, \'skip_dit\', []):
+            single_mod = mod_vectors_dict[f"single_blocks.{i}.modulation.lin"]
+
+            if ("single_block", i) in blocks_replace:
+                def block_wrap(args):
+                    out = {}
+                    out["img"] = block(args["img"], pe=args["pe"], distill_vec=args["distill_vec"])
+                    return out
+                out = blocks_replace[("single_block", i)]({"img": img, "pe": pe, "distill_vec": single_mod}, {"original_block": block_wrap})
+                img = out["img"]
+            else:
+                img = block(img, pe=pe, distill_vec=single_mod)
+
+            if control is not None:
+                control_o = control.get("output")
+                if i < len(control_o):
+                    add = control_o[i]
+                    if add is not None:
+                        img[:, txt.shape[1]:, ...] += add
+
+            # PuLID attention injection (single blocks)
+            if self.pulid_data:
+                real_img = img[:, txt.shape[1]:, ...]
+                txt_cur = img[:, :txt.shape[1], ...]
+                if i % self.pulid_single_interval == 0:
+                    for _, node_data in self.pulid_data.items():
+                        condition_start = node_data[\'sigma_start\'] >= timesteps
+                        condition_end = timesteps >= node_data[\'sigma_end\']
+                        condition = torch.logical_and(condition_start, condition_end).all()
+                        if condition:
+                            real_img = real_img + node_data[\'weight\'] * self.pulid_ca[ca_idx].to(device)(node_data[\'embedding\'], real_img)
+                    ca_idx += 1
+                img = torch.cat((txt_cur, real_img), 1)
+
+    img = img[:, txt.shape[1]:, ...]
+    final_mod = mod_vectors_dict["final_layer.adaLN_modulation.1"]
+    img = self.final_layer(img, distill_vec=final_mod)
+    return img
+
+'''
+
+insert_before = 'def tensor_to_image(tensor):'
+assert insert_before in content, f'ERROR: tensor_to_image not found in pulidflux.py'
+content = content.replace(insert_before, forward_orig_fluxmod + insert_before, 1)
+assert 'forward_orig_fluxmod' in content, 'ERROR: forward_orig_fluxmod injection failed!'
+
+# ─── 2. Detectar FluxMod em apply_pulid_flux e usar forward correto ──────────
+old_method = (
+    '            # Replace model forward_orig with our own\n'
+    '            new_method = forward_orig.__get__(flux_model, flux_model.__class__)\n'
+    '            setattr(flux_model, \'forward_orig\', new_method)\n'
+)
+new_method = (
+    '            # Replace model forward_orig with our own\n'
+    '            # FIX: detect FluxMod (Chroma) — uses distribute_modulations, no time_in\n'
+    '            if hasattr(flux_model, \'distribute_modulations\'):\n'
+    '                new_method = forward_orig_fluxmod.__get__(flux_model, flux_model.__class__)\n'
+    '            else:\n'
+    '                new_method = forward_orig.__get__(flux_model, flux_model.__class__)\n'
+    '            setattr(flux_model, \'forward_orig\', new_method)\n'
+)
+
+assert old_method in content, f'ERROR: forward_orig replacement block not found in pulidflux.py — upstream changed?'
+content = content.replace(old_method, new_method, 1)
+assert 'distribute_modulations' in content, 'ERROR: FluxMod detection patch not applied!'
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print('pulidflux.py patched OK — forward_orig_fluxmod + FluxMod detection in apply_pulid_flux')
+PYEOF
+
 # ─── Patch ComfyUI_FluxMod/nodes.py: fix ChromaPaddingRemoval attention_mask ──
 # PROBLEMA: ChromaPromptTruncation.append acessa conditioning[0][1]["attention_mask"]
 #   mas o CLIPLoader type="chroma" (ComfyUI T5XXL com return_attention_masks=False)
@@ -241,4 +422,6 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
     grep -q 'self.scale = torch.nn.Parameter' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK" && \
-    grep -q 'attention_mask" in conditioning' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "nodes.py ChromaPaddingRemoval patch OK"
+    grep -q 'attention_mask" in conditioning' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "nodes.py ChromaPaddingRemoval patch OK" && \
+    grep -q 'forward_orig_fluxmod' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py forward_orig_fluxmod patch OK" && \
+    grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK"
