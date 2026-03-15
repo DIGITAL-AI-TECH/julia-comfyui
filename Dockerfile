@@ -17,7 +17,7 @@ RUN apt-get update -qq && \
 RUN /opt/venv/bin/pip install --quiet --no-cache-dir \
     onnxruntime-gpu \
     insightface==0.7.3 \
-    timm \
+    "timm>=0.9.7,<1.0" \
     ftfy \
     einops \
     kornia && \
@@ -585,6 +585,17 @@ PYEOF
 #   e poderia causar downgrade/conflito com as versões já fixadas acima
 RUN /opt/venv/bin/pip install --quiet --no-cache-dir "setuptools<81" && \
     /opt/venv/bin/pip install --quiet --no-cache-dir "opencv-python-headless>=4.7.0.72"
+
+# Deps necessárias para ReActor registrar seus nodes no ComfyUI
+# DIAGNÓSTICO Build #41: nodes.py tem `from segment_anything import sam_model_registry`
+#   no nível de módulo → ModuleNotFoundError impede o node de registrar (silent skip)
+# segment-anything: importado no nível de módulo em nodes.py — CRÍTICO
+# albumentations, ultralytics, onnx: também usados em scripts/ e nodes.py
+RUN /opt/venv/bin/pip install --quiet --no-cache-dir \
+    "albumentations>=1.4.16" \
+    "segment-anything" \
+    "ultralytics" \
+    "onnx>=1.14.0"
 
 # REPO RENOMEADO: comfyui-reactor-node → ComfyUI-ReActor (URL antiga = privada/arquivada)
 # --depth=1: clone raso (mais rápido, menos download)
