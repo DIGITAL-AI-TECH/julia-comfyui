@@ -586,9 +586,9 @@ PYEOF
 RUN /opt/venv/bin/pip install --quiet --no-cache-dir "setuptools<81" && \
     /opt/venv/bin/pip install --quiet --no-cache-dir "opencv-python-headless>=4.7.0.72"
 
-# SEPARADO em dois RUN: o || true anterior mascarava falha silenciosa do git clone
-# sem --quiet para ver erro real caso o clone falhe
-RUN git clone https://github.com/Gourieff/comfyui-reactor-node.git \
+# REPO RENOMEADO: comfyui-reactor-node → ComfyUI-ReActor (URL antiga = privada/arquivada)
+# --depth=1: clone raso (mais rápido, menos download)
+RUN git clone --depth=1 https://github.com/Gourieff/ComfyUI-ReActor.git \
     /comfyui/custom_nodes/comfyui-reactor-node
 
 # uninstall opencv-python (variante com GUI) — pode não existir, então || true é seguro aqui
