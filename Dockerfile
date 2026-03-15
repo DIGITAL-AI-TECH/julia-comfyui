@@ -135,6 +135,32 @@ assert 'from facexlib.parsing import init_parsing_model\n        from facexlib.u
 print('pulidflux.py patched OK — all 3 lazy imports verified')
 EOF
 
+# ─── Patch ComfyUI_FluxMod/layers.py: fix RMSNorm = None ─────────────────────
+# PROBLEMA: ComfyUI main setou RMSNorm = None em comfy/ldm/flux/layers.py
+#   ("Fix import for some custom nodes, TODO: delete eventually")
+#   ComfyUI_FluxMod importa RMSNorm desse módulo e usa em Approximator.__init__:
+#     self.norms = nn.ModuleList([RMSNorm(hidden_dim, operations=operations) ...])
+#   Com RMSNorm = None, isso vira None(hidden_dim, ...) → TypeError: 'NoneType' object is not callable
+# SOLUÇÃO: substituir RMSNorm(hidden_dim, operations=operations) por operations.RMSNorm(hidden_dim)
+#   operations.RMSNorm = disable_weight_init.RMSNorm (herda de torch.nn.RMSNorm) — funciona corretamente.
+RUN python3 << 'EOF'
+path = '/comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py'
+with open(path, 'r') as f:
+    content = f.read()
+
+old_rms = '        self.norms = nn.ModuleList([RMSNorm( hidden_dim, operations=operations) for x in range( n_layers)])'
+new_rms = '        self.norms = nn.ModuleList([operations.RMSNorm(hidden_dim) for x in range(n_layers)])  # FIX: RMSNorm=None in comfy.ldm.flux.layers (ComfyUI main), use operations.RMSNorm'
+
+assert old_rms in content, f'ERROR: RMSNorm block not found in layers.py — upstream changed? Got: {repr(content[content.find("self.norms"):content.find("self.norms")+200])}'
+content = content.replace(old_rms, new_rms)
+assert 'operations.RMSNorm(hidden_dim)' in content, 'ERROR: RMSNorm patch not applied!'
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print('layers.py patched OK — RMSNorm fixed to use operations.RMSNorm')
+EOF
+
 # ─── Symlinks: Network Volume → ComfyUI model paths ───────────────────────────
 # Modelos ficam no volume persistente (/runpod-volume/models/)
 # ComfyUI procura em /comfyui/models/ → symlinks resolvem em runtime
@@ -156,4 +182,5 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     ls /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "FluxMod/ChromaWrapper OK" && \
     grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py pick_operations patch OK" && \
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
-    grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK"
+    grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
+    grep -q 'operations.RMSNorm(hidden_dim)' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK"
