@@ -9,12 +9,14 @@ RUN apt-get update -qq && \
 # ─── Python deps — instalar SEMPRE na VENV (/opt/venv) ────────────────────────
 # CRÍTICO: usar /opt/venv/bin/pip — pip do sistema não serve para o ComfyUI runtime
 # onnxruntime-gpu: OBRIGATÓRIO — CPU version crasha container (conflito libs GPU)
-# open_clip_torch: necessário para EVA-CLIP loader do PuLID
-# facexlib, einops, kornia: dependências do ComfyUI-PuLID-Flux-Enhanced
+# NÃO instalar open_clip_torch: base image já tem! Reinstalar quebra ComfyUI startup
+# timm, ftfy: deps do eva_clip (PuLID) não presentes no base
+# facexlib, einops, kornia: deps do ComfyUI-PuLID-Flux-Enhanced
 RUN /opt/venv/bin/pip install --quiet --no-cache-dir \
     onnxruntime-gpu \
     insightface==0.7.3 \
-    open_clip_torch \
+    timm \
+    ftfy \
     facexlib \
     einops \
     kornia
@@ -41,6 +43,6 @@ RUN mkdir -p /comfyui/models && \
     ln -sf /runpod-volume/models/clip         /comfyui/models/clip
 
 # ─── Verificação de build ──────────────────────────────────────────────────────
-RUN /opt/venv/bin/python -c "import onnxruntime, insightface, open_clip, facexlib, einops, kornia; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('open_clip OK'); print('facexlib OK')" && \
+RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK')" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
     ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK"
