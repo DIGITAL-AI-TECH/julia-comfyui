@@ -586,9 +586,13 @@ PYEOF
 RUN /opt/venv/bin/pip install --quiet --no-cache-dir "setuptools<81" && \
     /opt/venv/bin/pip install --quiet --no-cache-dir "opencv-python-headless>=4.7.0.72"
 
-RUN git clone --quiet https://github.com/Gourieff/comfyui-reactor-node.git \
-    /comfyui/custom_nodes/comfyui-reactor-node && \
-    /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true
+# SEPARADO em dois RUN: o || true anterior mascarava falha silenciosa do git clone
+# sem --quiet para ver erro real caso o clone falhe
+RUN git clone https://github.com/Gourieff/comfyui-reactor-node.git \
+    /comfyui/custom_nodes/comfyui-reactor-node
+
+# uninstall opencv-python (variante com GUI) — pode não existir, então || true é seguro aqui
+RUN /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true
 
 # Silenciar warnings do albumentations update checker (sem impacto funcional)
 ENV NO_ALBUMENTATIONS_UPDATE=1
