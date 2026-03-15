@@ -244,7 +244,7 @@ def forward_orig_fluxmod(
     input_vec = torch.cat([timestep_guidance, modulation_index], dim=-1)
 
     mod_vectors = self.distilled_guidance_layer(input_vec)
-    mod_vectors_dict = self.distribute_modulations(mod_vectors, len(self.double_blocks), len(self.single_blocks))
+    mod_vectors_dict = self.distribute_modulations(mod_vectors, len(self.single_blocks), len(self.double_blocks))
 
     txt = self.txt_in(txt)
     ids = torch.cat((txt_ids, img_ids), dim=1)
