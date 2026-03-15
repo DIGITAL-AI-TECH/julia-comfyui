@@ -58,18 +58,30 @@ path = '/comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py'
 with open(path, 'r') as f:
     content = f.read()
 
-old_block = '        fp8 = model_conf.optimizations.get("fp8", model_conf.scaled_fp8 is not None)\n        operations = comfy.ops.pick_operations(\n            unet_config.get("dtype"),\n            model.manual_cast_dtype,\n            fp8_optimizations=fp8,\n            scaled_fp8=model_conf.scaled_fp8,\n        )'
+old_pick = '        fp8 = model_conf.optimizations.get("fp8", model_conf.scaled_fp8 is not None)\n        operations = comfy.ops.pick_operations(\n            unet_config.get("dtype"),\n            model.manual_cast_dtype,\n            fp8_optimizations=fp8,\n            scaled_fp8=model_conf.scaled_fp8,\n        )'
 
-new_block = '        fp8 = model_conf.optimizations.get("fp8", getattr(model_conf, "scaled_fp8", None) is not None)\n        import inspect as _inspect\n        if "scaled_fp8" in _inspect.signature(comfy.ops.pick_operations).parameters:\n            operations = comfy.ops.pick_operations(\n                unet_config.get("dtype"),\n                model.manual_cast_dtype,\n                fp8_optimizations=fp8,\n                scaled_fp8=getattr(model_conf, "scaled_fp8", None),\n            )\n        else:\n            # ComfyUI main (Feb 2026+): uses model_config= instead of scaled_fp8=\n            operations = comfy.ops.pick_operations(\n                unet_config.get("dtype"),\n                model.manual_cast_dtype,\n                fp8_optimizations=fp8,\n                model_config=model_conf,\n            )'
+new_pick = '        fp8 = model_conf.optimizations.get("fp8", getattr(model_conf, "scaled_fp8", None) is not None)\n        import inspect as _inspect\n        if "scaled_fp8" in _inspect.signature(comfy.ops.pick_operations).parameters:\n            operations = comfy.ops.pick_operations(\n                unet_config.get("dtype"),\n                model.manual_cast_dtype,\n                fp8_optimizations=fp8,\n                scaled_fp8=getattr(model_conf, "scaled_fp8", None),\n            )\n        else:\n            # ComfyUI main (Feb 2026+): uses model_config= instead of scaled_fp8=\n            operations = comfy.ops.pick_operations(\n                unet_config.get("dtype"),\n                model.manual_cast_dtype,\n                fp8_optimizations=fp8,\n                model_config=model_conf,\n            )'
 
-assert old_block in content, f'ERROR: Target block not found in loader.py — upstream changed?'
-content = content.replace(old_block, new_block)
-assert '_inspect.signature' in content, 'ERROR: Patch not applied!'
+assert old_pick in content, f'ERROR: pick_operations block not found — upstream changed?'
+content = content.replace(old_pick, new_pick)
+assert '_inspect.signature' in content, 'ERROR: pick_operations patch not applied!'
+
+# FIX 2: strict=False no load_state_dict
+# gonzalomoChroma v3.0 foi treinado SEM QKNorm (query_norm/key_norm).
+# ComfyUI main adicionou QKNorm ao DoubleStreamBlock — load com strict=True
+# falha com "Missing key(s) in state_dict". Com strict=False, RMSNorm inicia
+# weight=ones (identidade) — modelo funciona corretamente sem esses pesos.
+old_load = '    model.diffusion_model.load_state_dict(state_dict)'
+new_load = '    model.diffusion_model.load_state_dict(state_dict, strict=False)  # strict=False: suporte a modelos Chroma sem QKNorm (query_norm/key_norm)'
+
+assert old_load in content, f'ERROR: load_state_dict line not found — upstream changed?'
+content = content.replace(old_load, new_load)
+assert 'strict=False' in content, 'ERROR: strict=False patch not applied!'
 
 with open(path, 'w') as f:
     f.write(content)
 
-print('loader.py patched OK — pick_operations compatibility shim applied')
+print('loader.py patched OK — pick_operations shim + strict=False applied')
 EOF
 
 # ─── Patch pulidflux.py: lazy imports para evitar startup hang ────────────────
@@ -142,5 +154,6 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
     ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK" && \
     ls /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "FluxMod/ChromaWrapper OK" && \
-    grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py patch OK" && \
+    grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py pick_operations patch OK" && \
+    grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK"
