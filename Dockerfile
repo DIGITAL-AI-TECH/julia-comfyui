@@ -1,4 +1,4 @@
-FROM runpod/worker-comfyui:5.7.1-base
+FROM runpod/worker-comfyui:main-base
 
 # ─── Build tools ───────────────────────────────────────────────────────────────
 # Necessários para compilar insightface do source (sem wheel cp312)
