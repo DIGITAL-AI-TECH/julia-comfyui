@@ -11,15 +11,18 @@ RUN apt-get update -qq && \
 # onnxruntime-gpu: OBRIGATÓRIO — CPU version crasha container (conflito libs GPU)
 # NÃO instalar open_clip_torch: base image já tem! Reinstalar quebra ComfyUI startup
 # timm, ftfy: deps do eva_clip (PuLID) não presentes no base
-# facexlib, einops, kornia: deps do ComfyUI-PuLID-Flux-Enhanced
+# facexlib --no-deps: CRÍTICO — facexlib deps padrão puxam numba que faz compilação
+#   CUDA JIT na primeira importação (10-30 min), travando o startup do ComfyUI
+# einops, kornia: deps do ComfyUI-PuLID-Flux-Enhanced (leves, sem CUDA init)
 RUN /opt/venv/bin/pip install --quiet --no-cache-dir \
     onnxruntime-gpu \
     insightface==0.7.3 \
     timm \
     ftfy \
-    facexlib \
     einops \
-    kornia
+    kornia && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir --no-deps facexlib && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir filterpy scipy
 
 # ─── Custom Nodes ──────────────────────────────────────────────────────────────
 # IPAdapter Plus: IPAdapterFaceID + IPAdapterInsightFaceLoader
