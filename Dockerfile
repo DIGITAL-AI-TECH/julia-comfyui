@@ -181,6 +181,70 @@ with open(path, 'w') as f:
 print('layers.py patched OK — RMSNorm class defined with scale parameter (checkpoint-compatible)')
 EOF
 
+# ─── Patch ComfyUI_FluxMod/layers.py: fix QKNorm — Build #36 ─────────────────
+# ROOT CAUSE all-black output confirmado (896x1152 PNG, 3082 bytes, 100% zeros):
+# DoubleStreamBlock/SingleStreamBlock herdam do ComfyUI main que ADICIONOU QKNorm
+# (query_norm/key_norm via SelfAttention.norm). gonzalomoChroma foi treinado SEM QKNorm.
+# Com strict=False (patch anterior), pesos inicializam weight=ones →
+#   RMSNorm(x) = x / rms(x) * 1.0  →  Q e K normalizados para norma unitária
+#   → dot products Q·K ≈ cos_similarity × head_dim  (muito pequenos para seq longa)
+#   → softmax(QK/sqrt(d)) ≈ uniforme (1/N para N~260k tokens)
+#   → attention output ≈ mean(V) ≈ próximo de zero
+#   → denoising completamente quebrado → imagem all-black.
+# FIX: substituir QKNorm por NoOpQKNorm (retorna q, k sem modificação)
+#   após super().__init__() em DoubleStreamBlock e SingleStreamBlock.
+RUN python3 << 'EOF'
+path = '/comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py'
+with open(path, 'r') as f:
+    content = f.read()
+
+# 1. Inserir classe NoOpQKNorm antes de DoubleStreamBlock
+noop_class = '''
+# FIX Build #36: NoOpQKNorm para gonzalomoChroma (treinado SEM QKNorm)
+# QKNorm weight=ones normaliza Q/K para norma unitaria → atencao uniforme → all-black
+class NoOpQKNorm(torch.nn.Module):
+    """Identity: Q e K passam sem normalizacao. Compativel com QKNorm.forward(q,k,v) API."""
+    def forward(self, q, k, v):
+        return q, k
+
+'''
+
+insert_before = 'class DoubleStreamBlock(layers.DoubleStreamBlock):'
+assert insert_before in content, 'ERROR: DoubleStreamBlock class not found in layers.py'
+content = content.replace(insert_before, noop_class + insert_before, 1)
+assert 'class NoOpQKNorm' in content, 'ERROR: NoOpQKNorm injection failed!'
+
+# 2. DoubleStreamBlock.__init__: disable img_attn.norm e txt_attn.norm
+# Chamadas em DoubleStreamBlock.forward: self.img_attn.norm(img_q, img_k, img_v)
+#                                         self.txt_attn.norm(txt_q, txt_k, txt_v)
+old_double = '        del self.img_mod\n        del self.txt_mod\n'
+new_double  = ('        del self.img_mod\n'
+               '        del self.txt_mod\n'
+               '        # FIX Build #36: desabilitar QKNorm (gonzalomoChroma treinado sem QKNorm)\n'
+               '        self.img_attn.norm = NoOpQKNorm()\n'
+               '        self.txt_attn.norm = NoOpQKNorm()\n')
+
+assert old_double in content, 'ERROR: del self.img_mod / del self.txt_mod block not found in layers.py'
+content = content.replace(old_double, new_double, 1)
+assert 'self.img_attn.norm = NoOpQKNorm()' in content, 'ERROR: DoubleStreamBlock QKNorm patch failed!'
+
+# 3. SingleStreamBlock.__init__: disable self.norm
+# Chamada em SingleStreamBlock.forward: q, k = self.norm(q, k, v)
+old_single = '        del self.modulation\n'
+new_single  = ('        del self.modulation\n'
+               '        # FIX Build #36: desabilitar QKNorm\n'
+               '        self.norm = NoOpQKNorm()\n')
+
+assert old_single in content, 'ERROR: del self.modulation not found in layers.py'
+content = content.replace(old_single, new_single, 1)
+assert 'self.norm = NoOpQKNorm()' in content, 'ERROR: SingleStreamBlock QKNorm patch failed!'
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print('layers.py patched OK — QKNorm disabled in DoubleStreamBlock + SingleStreamBlock (Build #36)')
+EOF
+
 # ─── Patch pulidflux.py: forward_orig_fluxmod para Chroma/FluxMod ────────────
 # PROBLEMA: PuLID substitui flux_model.forward_orig com uma versão FLUX que chama
 #   self.time_in(timestep_embedding(timesteps, 256)) — mas FluxMod (ChromaDiffusionLoader)
@@ -422,6 +486,7 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
     grep -q 'self.scale = torch.nn.Parameter' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK" && \
+    grep -q 'class NoOpQKNorm' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py QKNorm fix (Build #36) OK" && \
     grep -q 'attention_mask" in conditioning' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "nodes.py ChromaPaddingRemoval patch OK" && \
     grep -q 'forward_orig_fluxmod' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py forward_orig_fluxmod patch OK" && \
     grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK"
