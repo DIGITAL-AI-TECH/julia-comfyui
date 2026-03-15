@@ -181,6 +181,43 @@ with open(path, 'w') as f:
 print('layers.py patched OK — RMSNorm class defined with scale parameter (checkpoint-compatible)')
 EOF
 
+# ─── Patch ComfyUI_FluxMod/nodes.py: fix ChromaPaddingRemoval attention_mask ──
+# PROBLEMA: ChromaPromptTruncation.append acessa conditioning[0][1]["attention_mask"]
+#   mas o CLIPLoader type="chroma" (ComfyUI T5XXL com return_attention_masks=False)
+#   NÃO inclui "attention_mask" no conditioning — KeyError fatal.
+# SOLUÇÃO: tornar o uso de attention_mask opcional (graceful fallback).
+#   - SE attention_mask presente: trunca tokens até o comprimento real
+#   - SE ausente: mantém todos os tokens (sem truncação — leve overhead, seguro)
+#   - SEMPRE seta pooled_output=zeros e guidance=0 (obrigatório para Chroma)
+RUN python3 << 'EOF'
+path = '/comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py'
+with open(path, 'r') as f:
+    content = f.read()
+
+# Find and replace the attention_mask block inside ChromaPromptTruncation.append
+old_block = (
+    '        pruning_idx = conditioning[0][1]["attention_mask"].sum() + 1\n'
+    '        conditioning[0][0] = conditioning[0][0][:, :pruning_idx]\n'
+    '        del conditioning[0][1]["attention_mask"]\n'
+)
+new_block = (
+    '        # FIX: attention_mask optional — ComfyUI T5 encoder sem return_attention_masks\n'
+    '        if "attention_mask" in conditioning[0][1]:\n'
+    '            pruning_idx = conditioning[0][1]["attention_mask"].sum() + 1\n'
+    '            conditioning[0][0] = conditioning[0][0][:, :pruning_idx]\n'
+    '            del conditioning[0][1]["attention_mask"]\n'
+)
+
+assert old_block in content, f'ERROR: attention_mask block not found in nodes.py — upstream changed?'
+content = content.replace(old_block, new_block, 1)
+assert 'attention_mask" in conditioning[0][1]' in content, 'ERROR: attention_mask patch not applied!'
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print('nodes.py patched OK — ChromaPaddingRemoval handles missing attention_mask')
+EOF
+
 # ─── Symlinks: Network Volume → ComfyUI model paths ───────────────────────────
 # Modelos ficam no volume persistente (/runpod-volume/models/)
 # ComfyUI procura em /comfyui/models/ → symlinks resolvem em runtime
@@ -203,4 +240,5 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py pick_operations patch OK" && \
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
-    grep -q 'self.scale = torch.nn.Parameter' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK"
+    grep -q 'self.scale = torch.nn.Parameter' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK" && \
+    grep -q 'attention_mask" in conditioning' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "nodes.py ChromaPaddingRemoval patch OK"
