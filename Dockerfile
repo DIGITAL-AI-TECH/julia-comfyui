@@ -569,6 +569,30 @@ with open(path, 'w') as f:
 print('pulidflux.py patched OK — Build #37: forward_orig_chroma_native + 3-way detection (FluxMod/ChromaNative/FLUX)')
 PYEOF
 
+# ─── ReActorFaceSwap ──────────────────────────────────────────────────────────
+# Faceswap tradicional: troca rosto de referência no output gerado
+# Deps obrigatórias: onnxruntime-gpu ✅, insightface ✅ (já instalados)
+#
+# setuptools<81: CRÍTICO — ReActor usa pkg_resources (removido em setuptools>=81)
+#   sem este pin, o auto-installer do ReActor quebra no startup do ComfyUI
+#
+# opencv-python-headless: variante sem GUI — correta para container headless
+# opencv-python (com GUI) é mutuamente exclusivo com headless — compartilham cv2
+#   o uninstall pós-clone garante que o auto-installer do ReActor não reinstale
+#   a versão errada (requirements.txt do ReActor pede opencv-python, sem headless)
+#
+# NÃO usar -r requirements.txt do ReActor: reinstalaria insightface+onnxruntime
+#   e poderia causar downgrade/conflito com as versões já fixadas acima
+RUN /opt/venv/bin/pip install --quiet --no-cache-dir "setuptools<81" && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir "opencv-python-headless>=4.7.0.72"
+
+RUN git clone --quiet https://github.com/Gourieff/comfyui-reactor-node.git \
+    /comfyui/custom_nodes/comfyui-reactor-node && \
+    /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true
+
+# Silenciar warnings do albumentations update checker (sem impacto funcional)
+ENV NO_ALBUMENTATIONS_UPDATE=1
+
 # ─── Patch ComfyUI_FluxMod/nodes.py: fix ChromaPaddingRemoval attention_mask ──
 # PROBLEMA: ChromaPromptTruncation.append acessa conditioning[0][1]["attention_mask"]
 #   mas o CLIPLoader type="chroma" (ComfyUI T5XXL com return_attention_masks=False)
@@ -617,14 +641,17 @@ RUN mkdir -p /comfyui/models && \
     ln -sf /runpod-volume/models/unet         /comfyui/models/unet         && \
     ln -sf /runpod-volume/models/vae          /comfyui/models/vae          && \
     ln -sf /runpod-volume/models/clip         /comfyui/models/clip         && \
-    ln -sf /runpod-volume/models/checkpoints  /comfyui/models/diffusion_models
+    ln -sf /runpod-volume/models/checkpoints        /comfyui/models/diffusion_models  && \
+    ln -sf /runpod-volume/models/facerestore_models /comfyui/models/facerestore_models && \
+    ln -sf /runpod-volume/models/upscale_models     /comfyui/models/upscale_models
 # NOTA: diffusion_models → checkpoints para ChromaDiffusionLoader encontrar gonzalomoChroma_v30.safetensors
 
 # ─── Verificação de build ──────────────────────────────────────────────────────
-RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK')" && \
+RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia, cv2; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK'); print('opencv ' + cv2.__version__)" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
     ls /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "PuLID OK" && \
     ls /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "FluxMod/ChromaWrapper OK" && \
+    ls /comfyui/custom_nodes/comfyui-reactor-node && echo "ReActor OK" && \
     grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py pick_operations patch OK" && \
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
