@@ -141,24 +141,44 @@ EOF
 #   ComfyUI_FluxMod importa RMSNorm desse módulo e usa em Approximator.__init__:
 #     self.norms = nn.ModuleList([RMSNorm(hidden_dim, operations=operations) ...])
 #   Com RMSNorm = None, isso vira None(hidden_dim, ...) → TypeError: 'NoneType' object is not callable
-# SOLUÇÃO: substituir RMSNorm(hidden_dim, operations=operations) por operations.RMSNorm(hidden_dim)
-#   operations.RMSNorm = disable_weight_init.RMSNorm (herda de torch.nn.RMSNorm) — funciona corretamente.
+# SOLUÇÃO: inserir definição própria de RMSNorm no layers.py ANTES da classe Approximator.
+#   IMPORTANTE: o checkpoint usa 'scale' (não 'weight') como nome do parâmetro do RMSNorm.
+#   torch.nn.RMSNorm usa 'weight' → state_dict mismatch. Precisamos de 'scale'.
+#   A classe abaixo é compatível com o checkpoint do gonzalomoChroma v3.0.
 RUN python3 << 'EOF'
 path = '/comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py'
 with open(path, 'r') as f:
     content = f.read()
 
-old_rms = '        self.norms = nn.ModuleList([RMSNorm( hidden_dim, operations=operations) for x in range( n_layers)])'
-new_rms = '        self.norms = nn.ModuleList([operations.RMSNorm(hidden_dim) for x in range(n_layers)])  # FIX: RMSNorm=None in comfy.ldm.flux.layers (ComfyUI main), use operations.RMSNorm'
+# Insert custom RMSNorm class right before class Approximator
+# This overrides the None import from comfy.ldm.flux.layers
+# Parameter named 'scale' matches gonzalomoChroma v3.0 checkpoint format
+rms_class = '''
 
-assert old_rms in content, f'ERROR: RMSNorm block not found in layers.py — upstream changed? Got: {repr(content[content.find("self.norms"):content.find("self.norms")+200])}'
-content = content.replace(old_rms, new_rms)
-assert 'operations.RMSNorm(hidden_dim)' in content, 'ERROR: RMSNorm patch not applied!'
+# FIX: RMSNorm = None in comfy/ldm/flux/layers.py (ComfyUI main, Feb 2026+)
+# Define compatible RMSNorm with 'scale' parameter (matches checkpoint format)
+class RMSNorm(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6, dtype=None, device=None, operations=None):
+        super().__init__()
+        self.eps = eps
+        self.scale = torch.nn.Parameter(torch.ones(dim, dtype=dtype, device=device))
+
+    def forward(self, x: Tensor) -> Tensor:
+        x_float = x.float()
+        rrms = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + self.eps)
+        return (x_float * rrms).to(dtype=x.dtype) * self.scale
+
+'''
+
+insert_before = 'class Approximator(nn.Module):'
+assert insert_before in content, f'ERROR: Approximator class not found in layers.py'
+content = content.replace(insert_before, rms_class + insert_before, 1)
+assert 'self.scale = torch.nn.Parameter(torch.ones(dim' in content, 'ERROR: RMSNorm class injection failed!'
 
 with open(path, 'w') as f:
     f.write(content)
 
-print('layers.py patched OK — RMSNorm fixed to use operations.RMSNorm')
+print('layers.py patched OK — RMSNorm class defined with scale parameter (checkpoint-compatible)')
 EOF
 
 # ─── Symlinks: Network Volume → ComfyUI model paths ───────────────────────────
@@ -183,4 +203,4 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q '_inspect.signature' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py pick_operations patch OK" && \
     grep -q 'strict=False' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/loader.py && echo "loader.py strict=False patch OK" && \
     grep -q 'lazy-import: FaceAnalysis' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py patch OK" && \
-    grep -q 'operations.RMSNorm(hidden_dim)' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK"
+    grep -q 'self.scale = torch.nn.Parameter' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py RMSNorm patch OK"
