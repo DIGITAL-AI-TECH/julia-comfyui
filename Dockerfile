@@ -602,8 +602,10 @@ RUN /opt/venv/bin/pip install --quiet --no-cache-dir \
 RUN git clone --depth=1 https://github.com/Gourieff/ComfyUI-ReActor.git \
     /comfyui/custom_nodes/comfyui-reactor-node
 
-# uninstall opencv-python (variante com GUI) — pode não existir, então || true é seguro aqui
-RUN /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true
+# ultralytics pode ter substituído opencv-python-headless por opencv-python (GUI)
+# Garantir que apenas headless existe: uninstall GUI → reinstalar headless
+RUN /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir "opencv-python-headless>=4.7.0.72"
 
 # Silenciar warnings do albumentations update checker (sem impacto funcional)
 ENV NO_ALBUMENTATIONS_UPDATE=1
