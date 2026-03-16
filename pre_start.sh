@@ -50,5 +50,36 @@ else
     echo "worker-comfyui: GonzaLomo SDXL já existe ($(ls -lh $GONZALOMO_SDXL | awk '{print $5}')). Pulando download."
 fi
 
+# ── GonzaLomo FLUX SAIO (v1.0) — base para Flux Refiner workflow ──────────────
+# FLUX checkpoint base para gonzaLomo Flux Refiner v3.0 (16 GB)
+# CivitAI model 1513492 / version 1968729
+GONZALOMO_FLUX="/runpod-volume/models/checkpoints/gonzalomoXLFluxPony_v10FluxSAIO.safetensors"
+if [ ! -f "$GONZALOMO_FLUX" ]; then
+    echo "worker-comfyui: GonzaLomo FLUX SAIO não encontrado. Baixando 16 GB..."
+    wget -q --show-progress --progress=dot:giga \
+        --header "Authorization: Bearer ${CIVITAI_TOKEN}" \
+        -O "$GONZALOMO_FLUX" \
+        "https://civitai.com/api/download/models/1968729?token=${CIVITAI_TOKEN}"
+    echo "worker-comfyui: GonzaLomo FLUX SAIO download completo: $(ls -lh $GONZALOMO_FLUX)"
+else
+    echo "worker-comfyui: GonzaLomo FLUX SAIO já existe ($(ls -lh $GONZALOMO_FLUX | awk '{print $5}')). Pulando download."
+fi
+
+# ── SAM ViT-B (Impact-Pack / FaceDetailer) ────────────────────────────────────
+# Modelo SAM necessário para SAMLoader node do ComfyUI-Impact-Pack
+# Usado no gonzaLomo Flux Refiner v3.0 para detecção de face no FaceDetailer
+SAM_MODEL="/runpod-volume/models/sams/sam_vit_b_01ec64.pth"
+mkdir -p "$(dirname $SAM_MODEL)"
+ln -sf "$(dirname $SAM_MODEL)" /comfyui/models/sams 2>/dev/null || true
+if [ ! -f "$SAM_MODEL" ]; then
+    echo "worker-comfyui: SAM ViT-B não encontrado. Baixando ~375 MB..."
+    wget -q --show-progress --progress=dot:mega \
+        -O "$SAM_MODEL" \
+        "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+    echo "worker-comfyui: SAM ViT-B download completo: $(ls -lh $SAM_MODEL)"
+else
+    echo "worker-comfyui: SAM ViT-B já existe ($(ls -lh $SAM_MODEL | awk '{print $5}')). Pulando download."
+fi
+
 # Continuar com startup normal
 exec /start.sh

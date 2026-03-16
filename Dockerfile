@@ -754,6 +754,25 @@ RUN ln -sf /runpod-volume/models/wan_video /comfyui/models/wan_video 2>/dev/null
 RUN git clone --quiet --depth 1 https://github.com/arthurtravers/ComfyUI-VideoOutputBridge.git \
     /comfyui/custom_nodes/ComfyUI-VideoOutputBridge
 
+# ─── ComfyUI-Impact-Pack — FaceDetailer + SAMLoader ───────────────────────────
+# Necessário para gonzaLomo Flux Refiner v3.0 workflow
+# Fornece: FaceDetailer, SAMLoader, BboxDetectorSEGS, etc.
+# REF: https://github.com/ltdrdata/ComfyUI-Impact-Pack
+RUN git clone --quiet --depth 1 https://github.com/ltdrdata/ComfyUI-Impact-Pack.git \
+    /comfyui/custom_nodes/ComfyUI-Impact-Pack && \
+    cd /comfyui/custom_nodes/ComfyUI-Impact-Pack && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir segment-anything
+
+# ─── rgthree-comfy — Power Lora Loader ────────────────────────────────────────
+# Necessário para gonzaLomo Flux Refiner v3.0 workflow
+# Fornece: Power Lora Loader, Context nodes
+# REF: https://github.com/rgthree/rgthree-comfy
+RUN git clone --quiet --depth 1 https://github.com/rgthree/rgthree-comfy.git \
+    /comfyui/custom_nodes/rgthree-comfy && \
+    cd /comfyui/custom_nodes/rgthree-comfy && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true
+
 # ─── Verificação de build ──────────────────────────────────────────────────────
 RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia, cv2; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK'); print('opencv ' + cv2.__version__)" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
@@ -772,7 +791,9 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q 'class NoOpQKNorm' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/layers.py && echo "layers.py QKNorm fix (Build #36) OK" && \
     grep -q 'attention_mask" in conditioning' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "nodes.py ChromaPaddingRemoval patch OK" && \
     grep -q 'forward_orig_fluxmod' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py forward_orig_fluxmod patch OK" && \
-    grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK"
+    grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK" && \
+    ls /comfyui/custom_nodes/ComfyUI-Impact-Pack/modules/impact/core.py && echo "Impact-Pack OK" && \
+    ls /comfyui/custom_nodes/rgthree-comfy/nodes/power_lora_loader.py && echo "rgthree Power Lora Loader OK"
 
 # ─── ComfyUI handler check_server timeout ─────────────────────────────────────
 # O handler.py usa process_status (PID file) para decidir entre:
