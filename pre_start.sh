@@ -2,6 +2,10 @@
 # pre_start.sh — Baixa modelos grandes direto para o volume antes de iniciar ComfyUI
 # Roda apenas se o arquivo não existir (one-time download por volume)
 
+# AnimateDiff Evolved (ADE) espera animatediff_models/ mas Dockerfile cria animatediff/
+# Criar symlink adicional para garantir compatibilidade
+ln -sf /runpod-volume/models/animatediff /comfyui/models/animatediff_models 2>/dev/null || true
+
 T5="/runpod-volume/models/wan_video/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth"
 
 if [ ! -f "$T5" ]; then
