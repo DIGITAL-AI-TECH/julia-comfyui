@@ -763,3 +763,11 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q 'attention_mask" in conditioning' /comfyui/custom_nodes/ComfyUI_FluxMod/flux_mod/nodes.py && echo "nodes.py ChromaPaddingRemoval patch OK" && \
     grep -q 'forward_orig_fluxmod' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py forward_orig_fluxmod patch OK" && \
     grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK"
+
+# ─── Pre-start download script ────────────────────────────────────────────────
+# Baixa modelos grandes (T5 encoder 10.8 GB) diretamente para o volume
+# no primeiro cold start — bypassa S3 API quota completamente
+COPY pre_start.sh /pre_start.sh
+RUN chmod +x /pre_start.sh
+
+CMD ["/pre_start.sh"]
