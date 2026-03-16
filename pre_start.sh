@@ -35,5 +35,20 @@ else
     echo "worker-comfyui: T5 encoder já existe ($(ls -lh $T5 | awk '{print $5}')). Pulando download."
 fi
 
+# ── GonzaLomo SDXL Unity XL DMD (v4.0) ───────────────────────────────────────
+# SDXL checkpoint para refinamento + geração direta (6.6 GB)
+# CivitAI model 1513492 / version 1943922
+GONZALOMO_SDXL="/runpod-volume/models/checkpoints/gonzalomoXLFluxPony_v40UnityXLDMD.safetensors"
+if [ ! -f "$GONZALOMO_SDXL" ]; then
+    echo "worker-comfyui: GonzaLomo SDXL Unity DMD não encontrado. Baixando 6.6 GB..."
+    wget -q --show-progress --progress=dot:giga \
+        --header "Authorization: Bearer ${CIVITAI_TOKEN}" \
+        -O "$GONZALOMO_SDXL" \
+        "https://civitai.com/api/download/models/1943922?token=${CIVITAI_TOKEN}"
+    echo "worker-comfyui: GonzaLomo SDXL download completo: $(ls -lh $GONZALOMO_SDXL)"
+else
+    echo "worker-comfyui: GonzaLomo SDXL já existe ($(ls -lh $GONZALOMO_SDXL | awk '{print $5}')). Pulando download."
+fi
+
 # Continuar com startup normal
 exec /start.sh
