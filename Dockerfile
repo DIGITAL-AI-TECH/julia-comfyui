@@ -774,6 +774,16 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q 'forward_orig_fluxmod' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py forward_orig_fluxmod patch OK" && \
     grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK"
 
+# ─── ComfyUI handler check_server timeout ─────────────────────────────────────
+# O handler.py usa process_status (PID file) para decidir entre:
+#   - PID file encontrado + processo vivo → poll infinito
+#   - PID file NÃO encontrado → COMFY_API_FALLBACK_MAX_RETRIES (default 500 × 50ms = 25s)
+# Se a base image não criar o PID file, o fallback de 25s é usado.
+# ENV garante que mesmo sem PID file, o handler espera até 600s (600 × 1000ms = 10min)
+# cobrindo o tempo de carregamento de 15+ custom nodes pesados.
+ENV COMFY_API_AVAILABLE_MAX_RETRIES=600
+ENV COMFY_API_AVAILABLE_INTERVAL_MS=1000
+
 # ─── Pre-start download script ────────────────────────────────────────────────
 # Baixa modelos grandes (T5 encoder 10.8 GB) diretamente para o volume
 # no primeiro cold start — bypassa S3 API quota completamente
