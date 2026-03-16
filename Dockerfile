@@ -763,6 +763,17 @@ RUN git clone --quiet --depth 1 https://github.com/ltdrdata/ComfyUI-Impact-Pack.
     cd /comfyui/custom_nodes/ComfyUI-Impact-Pack && \
     /opt/venv/bin/pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true
 
+# ─── ComfyUI-Impact-Subpack — UltralyticsDetectorProvider (YOLO) ──────────────
+# Necessário para gonzaLomo Flux Refiner v3.0 workflow
+# Fornece: UltralyticsDetectorProvider (cnr_id: comfyui-impact-subpack)
+# SEPARADO do Impact-Pack — repo distinto!
+# REF: https://github.com/ltdrdata/ComfyUI-Impact-Subpack
+RUN git clone --quiet --depth 1 https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git \
+    /comfyui/custom_nodes/ComfyUI-Impact-Subpack && \
+    cd /comfyui/custom_nodes/ComfyUI-Impact-Subpack && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir ultralytics 2>/dev/null || true && \
+    /opt/venv/bin/pip install --quiet --no-cache-dir -r requirements.txt 2>/dev/null || true
+
 # ─── rgthree-comfy — Power Lora Loader ────────────────────────────────────────
 # Necessário para gonzaLomo Flux Refiner v3.0 workflow
 # Fornece: Power Lora Loader, Context nodes
@@ -792,6 +803,7 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
     grep -q 'forward_orig_fluxmod' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py forward_orig_fluxmod patch OK" && \
     grep -q 'distribute_modulations' /comfyui/custom_nodes/ComfyUI-PuLID-Flux-Enhanced/pulidflux.py && echo "pulidflux.py FluxMod detection patch OK" && \
     ls /comfyui/custom_nodes/ComfyUI-Impact-Pack/modules/impact/core.py && echo "Impact-Pack OK" && \
+    ls /comfyui/custom_nodes/ComfyUI-Impact-Subpack && echo "Impact-Subpack (UltralyticsDetectorProvider) OK" && \
     ls /comfyui/custom_nodes/rgthree-comfy/py/power_lora_loader.py && echo "rgthree Power Lora Loader OK"
 
 # ─── ComfyUI handler check_server timeout ─────────────────────────────────────
