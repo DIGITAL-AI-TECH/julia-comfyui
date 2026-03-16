@@ -744,6 +744,16 @@ RUN /opt/venv/bin/pip uninstall -y opencv-python 2>/dev/null || true && \
 # Symlink Wan Video models
 RUN ln -sf /runpod-volume/models/wan_video /comfyui/models/wan_video 2>/dev/null || true
 
+# ─── VideoOutputBridge — expõe VHS_VideoCombine gifs como images ───────────────
+# PROBLEMA: runpod/worker-comfyui handler captura apenas campo 'images' (SaveImage)
+#   VHS_VideoCombine salva em campo 'gifs' que o handler não forwarda
+#   → job retorna 'success_no_images' mesmo com vídeo gerado
+# SOLUÇÃO: VideoOutputBridge remapeia 'gifs' → 'images' no histórico do ComfyUI
+#   permite que o handler capture .mp4/.webm/.gif como se fossem imagens
+# REF: https://github.com/arthurtravers/ComfyUI-VideoOutputBridge
+RUN git clone --quiet --depth 1 https://github.com/arthurtravers/ComfyUI-VideoOutputBridge.git \
+    /comfyui/custom_nodes/ComfyUI-VideoOutputBridge
+
 # ─── Verificação de build ──────────────────────────────────────────────────────
 RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, einops, kornia, cv2; print('onnxruntime ' + onnxruntime.__version__); print('providers: ' + str(onnxruntime.get_available_providers())); print('insightface OK'); print('timm OK'); print('facexlib OK'); print('opencv ' + cv2.__version__)" && \
     ls /comfyui/custom_nodes/ComfyUI_IPAdapter_plus/IPAdapterPlus.py && echo "IPAdapter OK" && \
