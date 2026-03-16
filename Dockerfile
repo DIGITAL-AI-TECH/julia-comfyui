@@ -780,21 +780,59 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
 #   - PID file NÃO encontrado → COMFY_API_FALLBACK_MAX_RETRIES (default 500 × 50ms = 25s)
 # Template env vars (COMFY_API_AVAILABLE_MAX_RETRIES=3600) parecem não ser aplicadas no
 # serverless — ENVs do Dockerfile são aplicadas mas o INTERVAL_MS permanece em 50ms.
-# Observado: job falha em 30s = 600 retries × 50ms (MAX_RETRIES=600 aplicado, INTERVAL não).
-# FIX DEFINITIVO: patch direto nos defaults do handler.py via sed:
-#   1. COMFY_API_FALLBACK_MAX_RETRIES: 500 → 3600 (60 min sem PID file)
-#   2. default interval: 50 → 1000 ms (1s entre tentativas)
-# Resultado: mesmo sem env vars, handler espera 3600 × 1000ms = 60 min.
-RUN sed -i \
-    's/COMFY_API_FALLBACK_MAX_RETRIES = 500/COMFY_API_FALLBACK_MAX_RETRIES = 3600/' \
-    /handler.py && \
-    sed -i \
-    "s/os.environ.get(\"COMFY_API_AVAILABLE_INTERVAL_MS\", 50)/os.environ.get(\"COMFY_API_AVAILABLE_INTERVAL_MS\", 1000)/" \
-    /handler.py && \
-    echo "handler.py patched:" && \
-    grep -n "COMFY_API_FALLBACK\|COMFY_API_AVAILABLE_INTERVAL_MS" /handler.py
+# FIX DEFINITIVO v2 — handler.py timeout patch via Python (mais robusto que sed)
+#
+# Contexto: handler.py usa check_server(url, COMFY_API_AVAILABLE_MAX_RETRIES, COMFY_API_AVAILABLE_INTERVAL_MS)
+#   - COMFY_API_AVAILABLE_MAX_RETRIES default = 0 → sem PID file → fallback 500 × 50ms = 25s (FAIL)
+#   - ENV vars do Dockerfile/template não chegam corretamente no serverless RunPod
+#   - Abordagem DUAL: Python patch modifica valores + append overrides como backup
+#
+# Resultado: COMFY_API_FALLBACK_MAX_RETRIES=7200 × INTERVAL=1000ms = 7200s = 2h (mais que suficiente)
+#   (ComfyUI leva ~3-4min para iniciar com todos os custom nodes)
+RUN python3 - << 'PYEOF'
+import re
 
-ENV COMFY_API_AVAILABLE_MAX_RETRIES=3600
+with open('/handler.py', 'r') as f:
+    content = f.read()
+
+# 1) Increase FALLBACK_MAX_RETRIES: 500 → 7200
+old = 'COMFY_API_FALLBACK_MAX_RETRIES = 500'
+new = 'COMFY_API_FALLBACK_MAX_RETRIES = 7200'
+if old in content:
+    content = content.replace(old, new)
+    print(f'✅ FALLBACK_MAX_RETRIES: 500 → 7200')
+else:
+    print(f'⚠️  FALLBACK_MAX_RETRIES pattern not found')
+
+# 2) Change interval default: 50 → 1000 ms (single or multiline variants)
+for old_ms in [
+    "os.environ.get(\"COMFY_API_AVAILABLE_INTERVAL_MS\", 50)",
+    "os.environ.get('COMFY_API_AVAILABLE_INTERVAL_MS', 50)",
+]:
+    new_ms = old_ms.replace(", 50)", ", 1000)")
+    if old_ms in content:
+        content = content.replace(old_ms, new_ms)
+        print(f'✅ INTERVAL_MS default: 50 → 1000')
+        break
+else:
+    print(f'⚠️  INTERVAL_MS pattern not found')
+
+with open('/handler.py', 'w') as f:
+    f.write(content)
+
+print('Verification:')
+for line in content.splitlines():
+    if 'COMFY_API_FALLBACK' in line or 'COMFY_API_AVAILABLE_INTERVAL_MS' in line:
+        print(f'  {line.strip()}')
+PYEOF
+
+# Backup: append module-level overrides AFTER all existing code
+# Python evaluates module globals top-to-bottom; last assignment wins at call time
+RUN printf '\n\n# ── RunPod patch: override retry constants ──────────────────────────────────\nCOMFY_API_FALLBACK_MAX_RETRIES = 7200\nCOMFY_API_AVAILABLE_INTERVAL_MS = 1000\nCOMFY_API_AVAILABLE_MAX_RETRIES = 7200\n' >> /handler.py && \
+    echo "handler.py final constants:" && \
+    grep -n "COMFY_API_FALLBACK\|COMFY_API_AVAILABLE_MAX_RETRIES\|COMFY_API_AVAILABLE_INTERVAL" /handler.py | tail -20
+
+ENV COMFY_API_AVAILABLE_MAX_RETRIES=7200
 ENV COMFY_API_AVAILABLE_INTERVAL_MS=1000
 
 # ─── Pre-start download script ────────────────────────────────────────────────
