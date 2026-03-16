@@ -81,5 +81,21 @@ else
     echo "worker-comfyui: SAM ViT-B já existe ($(ls -lh $SAM_MODEL | awk '{print $5}')). Pulando download."
 fi
 
+# ── YOLO face detector (Impact-Pack / FaceDetailer / UltralyticsDetectorProvider) ─
+# face_yolov8m.pt — necessário para UltralyticsDetectorProvider no gonzaLomo Flux Refiner v3.0
+# Impact-Pack procura em comfyui/models/ultralytics/bbox/
+mkdir -p /runpod-volume/models/ultralytics/bbox
+ln -sf /runpod-volume/models/ultralytics /comfyui/models/ultralytics 2>/dev/null || true
+YOLO_FACE="/runpod-volume/models/ultralytics/bbox/face_yolov8m.pt"
+if [ ! -f "$YOLO_FACE" ]; then
+    echo "worker-comfyui: face_yolov8m.pt não encontrado. Baixando ~24 MB..."
+    wget -q --show-progress --progress=dot:mega \
+        -O "$YOLO_FACE" \
+        "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt"
+    echo "worker-comfyui: face_yolov8m.pt download completo: $(ls -lh $YOLO_FACE)"
+else
+    echo "worker-comfyui: face_yolov8m.pt já existe ($(ls -lh $YOLO_FACE | awk '{print $5}')). Pulando download."
+fi
+
 # Continuar com startup normal
 exec /start.sh
