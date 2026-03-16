@@ -778,10 +778,23 @@ RUN /opt/venv/bin/python -c "import onnxruntime, insightface, timm, facexlib, ei
 # O handler.py usa process_status (PID file) para decidir entre:
 #   - PID file encontrado + processo vivo → poll infinito
 #   - PID file NÃO encontrado → COMFY_API_FALLBACK_MAX_RETRIES (default 500 × 50ms = 25s)
-# Se a base image não criar o PID file, o fallback de 25s é usado.
-# ENV garante que mesmo sem PID file, o handler espera até 600s (600 × 1000ms = 10min)
-# cobrindo o tempo de carregamento de 15+ custom nodes pesados.
-ENV COMFY_API_AVAILABLE_MAX_RETRIES=600
+# Template env vars (COMFY_API_AVAILABLE_MAX_RETRIES=3600) parecem não ser aplicadas no
+# serverless — ENVs do Dockerfile são aplicadas mas o INTERVAL_MS permanece em 50ms.
+# Observado: job falha em 30s = 600 retries × 50ms (MAX_RETRIES=600 aplicado, INTERVAL não).
+# FIX DEFINITIVO: patch direto nos defaults do handler.py via sed:
+#   1. COMFY_API_FALLBACK_MAX_RETRIES: 500 → 3600 (60 min sem PID file)
+#   2. default interval: 50 → 1000 ms (1s entre tentativas)
+# Resultado: mesmo sem env vars, handler espera 3600 × 1000ms = 60 min.
+RUN sed -i \
+    's/COMFY_API_FALLBACK_MAX_RETRIES = 500/COMFY_API_FALLBACK_MAX_RETRIES = 3600/' \
+    /handler.py && \
+    sed -i \
+    "s/os.environ.get(\"COMFY_API_AVAILABLE_INTERVAL_MS\", 50)/os.environ.get(\"COMFY_API_AVAILABLE_INTERVAL_MS\", 1000)/" \
+    /handler.py && \
+    echo "handler.py patched:" && \
+    grep -n "COMFY_API_FALLBACK\|COMFY_API_AVAILABLE_INTERVAL_MS" /handler.py
+
+ENV COMFY_API_AVAILABLE_MAX_RETRIES=3600
 ENV COMFY_API_AVAILABLE_INTERVAL_MS=1000
 
 # ─── Pre-start download script ────────────────────────────────────────────────
