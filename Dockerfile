@@ -867,6 +867,43 @@ RUN printf '\n\n# ── RunPod patch: override retry constants ─────�
 ENV COMFY_API_AVAILABLE_MAX_RETRIES=7200
 ENV COMFY_API_AVAILABLE_INTERVAL_MS=1000
 
+# ─── NUCLEAR PATCH: redefine check_server para aguardar ComfyUI de verdade ───
+# Abordagem anterior patcheava variáveis mas o handler.py pode usar caminhos
+# de código diferentes nas versões novas. Redefinir a função garante o fix.
+# Python: última definição de função em módulo vence — safe por design.
+RUN python3 - << 'NUCLEAR_EOF'
+nuclear_patch = '''
+
+# ── NUCLEAR PATCH Build #57: check_server redefinida para aguardar ComfyUI ──
+# Última definição da função vence em Python — override garantido
+import time as _rp_time
+import urllib.request as _rp_urllib
+
+def check_server(url, max_retries=7200, interval=1000):
+    """
+    Patched by Digital AI Build #57: aguarda ComfyUI estar pronto no port 8188.
+    Tenta até max_retries vezes com intervalo de interval ms entre tentativas.
+    Default: 7200 × 1000ms = 2h (mais que suficiente para cold start).
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            with _rp_urllib.urlopen(url, timeout=2):
+                return True
+        except Exception:
+            pass
+        _rp_time.sleep(interval / 1000.0)
+    return False
+'''
+with open('/handler.py', 'a') as f:
+    f.write(nuclear_patch)
+print('✅ NUCLEAR PATCH: check_server redefinida com sucesso')
+# Verificar que a nova definição está no arquivo
+with open('/handler.py', 'r') as f:
+    content = f.read()
+count = content.count('def check_server(')
+print(f'   Definições de check_server no arquivo: {count} (última vence)')
+NUCLEAR_EOF
+
 # ─── Pre-start download script ────────────────────────────────────────────────
 # Baixa modelos grandes (T5 encoder 10.8 GB) diretamente para o volume
 # no primeiro cold start — bypassa S3 API quota completamente
